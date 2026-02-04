@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { supabase, crmSupabase } from './supabaseClient';
 
 const propertyTypes = [
   'Single Family Home',
@@ -25,6 +26,8 @@ const timeframeOptions = [
 export default function App() {
   const [step, setStep] = useState(1);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const [animateIn, setAnimateIn] = useState(true);
   
   const [formData, setFormData] = useState({
@@ -67,8 +70,69 @@ export default function App() {
     }, 150);
   };
 
-  const handleSubmit = () => {
-    setIsSubmitted(true);
+  const handleSubmit = async () => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+    
+    try {
+      // Save to landing page database
+      const { error: landingError } = await supabase
+        .from('leads')
+        .insert([
+          {
+            name: formData.name,
+            phone: formData.phone,
+            email: formData.email,
+            address: formData.address,
+            city: formData.city,
+            zip_code: formData.zipCode,
+            property_type: formData.propertyType,
+            bedrooms: formData.bedrooms,
+            bathrooms: formData.bathrooms,
+            ac_replaced: formData.acReplaced,
+            roof_replaced: formData.roofReplaced,
+            additional_info: formData.additionalInfo,
+            has_media: formData.hasMedia
+          }
+        ]);
+
+      if (landingError) throw landingError;
+      
+      // Sync to CRM as hot lead
+      const { error: crmError } = await crmSupabase
+        .from('leads')
+        .insert([
+          {
+            name: formData.name,
+            phone: formData.phone,
+            email: formData.email,
+            address: formData.address,
+            city: formData.city,
+            zip: formData.zipCode,
+            property_type: formData.propertyType,
+            beds: formData.bedrooms ? parseInt(formData.bedrooms) || null : null,
+            baths: formData.bathrooms ? parseFloat(formData.bathrooms) || null : null,
+            hvac: formData.acReplaced,
+            roof: formData.roofReplaced,
+            notes: formData.additionalInfo,
+            is_hot: true,
+            status: 'new',
+            state: 'FL'
+          }
+        ]);
+
+      if (crmError) {
+        console.error('CRM sync error:', crmError);
+        // Don't fail the submission if CRM sync fails
+      }
+      
+      setIsSubmitted(true);
+    } catch (error) {
+      console.error('Error submitting lead:', error);
+      setSubmitError('Something went wrong. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const canProceed = () => {
@@ -474,17 +538,20 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={!canProceed()}
+                disabled={!canProceed() || isSubmitting}
                 className={`flex-1 py-4 rounded-xl font-semibold text-base transition-all active:scale-[0.98] ${
-                  canProceed()
+                  canProceed() && !isSubmitting
                     ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-lg shadow-amber-500/25'
                     : 'bg-slate-700 text-slate-500 cursor-not-allowed'
                 }`}
               >
-                Get My Cash Offer 💰
+                {isSubmitting ? 'Submitting...' : 'Get My Cash Offer 💰'}
               </button>
             )}
           </div>
+          {submitError && (
+            <p className="mt-3 text-red-400 text-sm text-center">{submitError}</p>
+          )}
         </div>
 
         {/* Bottom trust badges - mobile */}
